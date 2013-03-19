@@ -61,6 +61,7 @@ public class AttributeFileFilter extends AbstractFileFilter {
     /** Tests if the file is a {@link com.mucommander.commons.file.AbstractFile#isRoot() root folder}. */
     public static final int ROOT      = 6;
 
+    public static final int JAR_EXTENSION      = 7;
 
     /** The attribute to test files against */
     private int attribute;
@@ -128,6 +129,8 @@ public class AttributeFileFilter extends AbstractFileFilter {
                 return file.isHidden();
             case ROOT:
                 return file.isRoot();
+            case JAR_EXTENSION:   
+                return !file.isDirectory() && "jar".equalsIgnoreCase(file.getExtension());
         }
         return true;
     }

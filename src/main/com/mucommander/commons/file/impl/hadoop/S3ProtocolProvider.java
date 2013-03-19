@@ -19,13 +19,13 @@
 
 package com.mucommander.commons.file.impl.hadoop;
 
+import java.io.IOException;
+
 import com.mucommander.commons.file.AbstractFile;
 import com.mucommander.commons.file.FileURL;
 import com.mucommander.commons.file.ProtocolProvider;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-
-import java.io.IOException;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileStatus;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileSystem;
 
 /**
  * A file protocol provider for the Amazon S3 protocol, provided by the Hadoop virtual filesystem.

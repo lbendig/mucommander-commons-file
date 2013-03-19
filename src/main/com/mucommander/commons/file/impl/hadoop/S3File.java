@@ -19,15 +19,15 @@
 
 package com.mucommander.commons.file.impl.hadoop;
 
-import com.mucommander.commons.file.AuthException;
-import com.mucommander.commons.file.Credentials;
-import com.mucommander.commons.file.FileURL;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
+
+import com.mucommander.commons.file.AuthException;
+import com.mucommander.commons.file.Credentials;
+import com.mucommander.commons.file.FileURL;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileStatus;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileSystem;
 
 /**
  * {@link HadoopFile} implementation for the Amazon S3 protocol.

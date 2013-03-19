@@ -241,6 +241,23 @@
         <jar jarfile="${dist.doc}" basedir="${docs}"/>
     </target>
 
+	  <!-- = Publish to local repo = -->
+	  <target name="publish" depends="release" description="Publish into local repository">
+	    <property name="pub.ivy.file" value="${res.ivy}/ivy.xml"/>
+   	  <echo>Publishing jars to local repository ...</echo>
+	  	
+	  	<ivy:publish pubrevision="${api.version}" 
+	   	             status="release" 
+	   	             resolver="local-repo"  
+	   	             srcivypattern="${pub.ivy.file}" 
+	   	             organisation="mucommander"
+	   	             module="mucommander-commons-file" 
+	   	             overwrite="true" 
+	   	             update="true">
+	   	  <artifacts pattern="${dist}/[artifact].[ext]"/>
+      </ivy:publish>
+	
+	   </target>
 
 
     <!-- = Reports targets ========================================================================================= -->

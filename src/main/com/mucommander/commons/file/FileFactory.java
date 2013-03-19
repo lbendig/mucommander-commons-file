@@ -19,20 +19,30 @@
 
 package com.mucommander.commons.file;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Iterator;
+import java.util.Random;
+import java.util.Vector;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.mucommander.commons.file.FileProtocols.CustomLoadableProtocol;
 import com.mucommander.commons.file.icon.FileIconProvider;
 import com.mucommander.commons.file.icon.impl.SwingFileIconProvider;
+import com.mucommander.commons.file.impl.hadoop.HDFSProtocolProvider;
 import com.mucommander.commons.file.impl.local.LocalFile;
 import com.mucommander.commons.file.impl.local.LocalProtocolProvider;
+import com.mucommander.commons.file.impl.qfs.QFSProtocolProvider;
 import com.mucommander.commons.file.util.FilePool;
+import com.mucommander.commons.file.util.JarClassLoader;
 import com.mucommander.commons.file.util.PathTokenizer;
 import com.mucommander.commons.file.util.PathUtils;
 import com.mucommander.commons.runtime.JavaVersions;
 import com.mucommander.commons.runtime.OsFamilies;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.*;
 
 /**
  * FileFactory is an abstract class that provides static methods to get a {@link AbstractFile} instance for
@@ -105,7 +115,13 @@ public class FileFactory {
 
     /** Default authenticator, used when none is specified */
     private static Authenticator defaultAuthenticator;
-
+    
+    /** Classloader for loading Hadoop classes dynamically from the provided path */
+    private static ClassLoader hadoopClassLoader;
+    
+    /** Classloader for loading Qfs classes dynamically from the provided path */
+    private static ClassLoader qfsClassLoader;
+    
     static {
         // Register built-in file protocols.
         ProtocolProvider protocolProvider;
@@ -116,11 +132,10 @@ public class FileFactory {
         registerProtocol(FileProtocols.FTP, new com.mucommander.commons.file.impl.ftp.FTPProtocolProvider());
         registerProtocol(FileProtocols.NFS, new com.mucommander.commons.file.impl.nfs.NFSProtocolProvider());
         registerProtocol(FileProtocols.SFTP, new com.mucommander.commons.file.impl.sftp.SFTPProtocolProvider());
-        if(JavaVersions.JAVA_1_6.isCurrentOrHigher()) {
-            // Hadoop requires Java 1.6
-            registerProtocol(FileProtocols.HDFS, new com.mucommander.commons.file.impl.hadoop.HDFSProtocolProvider());
-//            registerProtocol(FileProtocols.S3, new com.mucommander.commons.file.impl.hadoop.S3ProtocolProvider());
-        }
+//        if (JavaVersions.JAVA_1_6.isCurrentOrHigher()) {
+//            registerProtocol(FileProtocols.S3,
+//                    new com.mucommander.commons.file.impl.hadoop.S3ProtocolProvider());
+//        }
         registerProtocol(FileProtocols.S3, new com.mucommander.commons.file.impl.s3.S3ProtocolProvider());
 
         // Register built-in archive file formats, order for TarArchiveFile and GzipArchiveFile/Bzip2ArchiveFile is important:
@@ -148,7 +163,73 @@ public class FileFactory {
      */
     private FileFactory() {
     }
-
+    
+    /**
+     * Creates classloaders for loading Hadoop/QFS jars
+     * @param path - can be either a jar file or a directory
+     * @param protocol - type of loading (Hadoop or QFS)
+     * @throws Exception
+     */
+    public static void registerCustomClasses(String path, CustomLoadableProtocol protocol) throws Exception {
+        File file = new File(path);
+        if (!file.exists()) {
+            throw new Exception("Path is invalid!");
+        }
+        
+        ProtocolProvider provider = null;
+        if (protocol == CustomLoadableProtocol.HDFS) {
+            //make sure that only one classloader is used
+            if (hadoopClassLoader != null) {
+                return;
+            }
+            // Hadoop requires Java 1.6
+            if (!JavaVersions.JAVA_1_6.isCurrentOrHigher()) {
+                throw new Exception("Java version must be >= 1.6!");
+            }
+            hadoopClassLoader = JarClassLoader.load(file);
+            provider = new HDFSProtocolProvider();
+        }        
+        
+        if (protocol == CustomLoadableProtocol.QFS) {
+            if (qfsClassLoader != null) {
+                return;
+            }
+            qfsClassLoader = JarClassLoader.load(file);
+            provider = new QFSProtocolProvider();
+        }  
+        registerProtocol(protocol.getProtocolName(), provider); 
+        
+        
+    }
+    
+    /**
+     * @return - The Hadoop classloader
+     */
+    public static ClassLoader getHadoopClassLoader() {
+        return hadoopClassLoader;
+    }
+    
+    /**
+     * @return - The QFS classloader
+     */
+    public static ClassLoader getQFSClassLoader() {
+        return qfsClassLoader;
+    }
+    
+    /**
+     * Returns the custom classloader for a give custom protocol type
+     * @param protocol
+     * @return the previously initialized classloader
+     */
+    public static ClassLoader getCustomClassLoader(CustomLoadableProtocol protocol) {
+        if (protocol == CustomLoadableProtocol.HDFS) {
+            return hadoopClassLoader;
+        }
+        if (protocol == CustomLoadableProtocol.QFS) {
+            return qfsClassLoader;
+        }
+        return null;
+    }
 
     /**
      * Registers a new file protocol.

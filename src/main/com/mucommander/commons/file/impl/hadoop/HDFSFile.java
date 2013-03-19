@@ -19,15 +19,22 @@
 
 package com.mucommander.commons.file.impl.hadoop;
 
-import com.mucommander.commons.file.*;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.permission.FsPermission;
-import org.apache.hadoop.security.UnixUserGroupInformation;
-
 import java.io.IOException;
 import java.net.URI;
+
+import com.mucommander.commons.file.Credentials;
+import com.mucommander.commons.file.FileFactory;
+import com.mucommander.commons.file.FilePermissions;
+import com.mucommander.commons.file.FileProtocols.CustomLoadableProtocol;
+import com.mucommander.commons.file.FileURL;
+import com.mucommander.commons.file.PermissionBits;
+import com.mucommander.commons.file.SimpleFilePermissions;
+import com.mucommander.commons.file.impl.hadoop.wrapper.Configuration;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileStatus;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileSystem;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FsPermission;
+import com.mucommander.commons.file.impl.hadoop.wrapper.UnixUserGroupInformation;
+import com.mucommander.commons.file.impl.hadoop.wrapper.UserGroupInformation;
 
 /**
  * {@link HadoopFile} implementation for the HDFS protocol.
@@ -47,25 +54,35 @@ public class HDFSFile extends HadoopFile {
     private static String DEFAULT_GROUP;
 
     /** Default file permissions */
-    private final static FilePermissions DEFAULT_PERMISSIONS = new SimpleFilePermissions(
+    private static final FilePermissions DEFAULT_PERMISSIONS = new SimpleFilePermissions(
        FsPermission.getDefault().applyUMask(FsPermission.getUMask(DEFAULT_CONFIGURATION)).toShort() & PermissionBits.FULL_PERMISSION_INT
     );
 
-
     static {
+        
+        // UserGroupInformation differs in newer hadoop versions
         try {
-            UnixUserGroupInformation ugi = UnixUserGroupInformation.login(DEFAULT_CONFIGURATION);
-            DEFAULT_USERNAME = ugi.getUserName();
-            // Do not use default groups, as these are pretty much useless
+            // newer Hadoop
+            if (UnixUserGroupInformation.getClassToken() == null) {
+                UserGroupInformation fsOwner = UserGroupInformation.getCurrentUser();
+                DEFAULT_USERNAME = fsOwner.getShortUserName();
+            }
+            // legacy Hadoop
+            else {
+                UnixUserGroupInformation ugi = UnixUserGroupInformation
+                        .login(DEFAULT_CONFIGURATION);
+                DEFAULT_USERNAME = ugi.getUserName();
+                // Do not use default groups, as these are pretty much useless
+            }
         }
-        catch(Exception e) {
+        catch (Exception e) {
             // Should never happen but default to a reasonable value if it does
             DEFAULT_USERNAME = System.getProperty("user.name");
         }
 
         DEFAULT_GROUP = DEFAULT_CONFIGURATION.get("dfs.permissions.supergroup", "supergroup");
-    }
 
+    }
 
     protected HDFSFile(FileURL url) throws IOException {
         super(url);
@@ -110,6 +127,11 @@ public class HDFSFile extends HadoopFile {
 
     @Override
     protected FileSystem getHadoopFileSystem(FileURL url) throws IOException {
+        Thread currentThread = Thread.currentThread();
+        ClassLoader currentLoader = currentThread.getContextClassLoader();
+        currentThread.setContextClassLoader(FileFactory
+                .getCustomClassLoader(CustomLoadableProtocol.HDFS));     
+        
         // Note: getRealm returns a fresh instance every time
         FileURL realm = url.getRealm();
 
@@ -119,11 +141,13 @@ public class HDFSFile extends HadoopFile {
         // TODO: for some reason, setting the group has no effect: files are still created with the default supergroup
         conf.setStrings(UnixUserGroupInformation.UGI_PROPERTY_NAME, getUsername(url), getGroup(url));
 
-        return FileSystem.get(URI.create(realm.toString(false)), conf);
+        FileSystem fs = FileSystem.get(URI.create(realm.toString(false)), conf);
+        currentThread.setContextClassLoader(currentLoader);
+        return fs;
     }
 
     @Override
-    protected void setDefaultFileAttributes(FileURL url, HadoopFile.HadoopFileAttributes atts) {
+    protected void setDefaultFileAttributes(FileURL url, HadoopFileAttributes atts) {
         atts.setOwner(getUsername(url));
         atts.setGroup(getGroup(url));
         atts.setPermissions(DEFAULT_PERMISSIONS);

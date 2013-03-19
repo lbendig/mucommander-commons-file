@@ -19,18 +19,43 @@
 
 package com.mucommander.commons.file.impl.hadoop;
 
-import com.mucommander.commons.file.*;
-import com.mucommander.commons.file.filter.FilenameFilter;
-import com.mucommander.commons.io.*;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.*;
-import org.apache.hadoop.fs.permission.FsPermission;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static com.mucommander.commons.file.util.ClassLoaderUtils.loadHadoopClass;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.mucommander.commons.file.AbstractFile;
+import com.mucommander.commons.file.AuthException;
+import com.mucommander.commons.file.FileFactory;
+import com.mucommander.commons.file.FileOperation;
+import com.mucommander.commons.file.FilePermissions;
+import com.mucommander.commons.file.FileURL;
+import com.mucommander.commons.file.PermissionBits;
+import com.mucommander.commons.file.ProtocolFile;
+import com.mucommander.commons.file.SimpleFilePermissions;
+import com.mucommander.commons.file.SyncedFileAttributes;
+import com.mucommander.commons.file.UnsupportedFileOperation;
+import com.mucommander.commons.file.UnsupportedFileOperationException;
+import com.mucommander.commons.file.filter.FilenameFilter;
+import com.mucommander.commons.file.impl.hadoop.wrapper.Configuration;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FSDataInputStream;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileStatus;
+import com.mucommander.commons.file.impl.hadoop.wrapper.FileSystem;
+import com.mucommander.commons.file.impl.hadoop.wrapper.Path;
+import com.mucommander.commons.file.impl.s3.S3File;
+import com.mucommander.commons.file.util.ClassLoaderUtils;
+import com.mucommander.commons.io.ByteCounter;
+import com.mucommander.commons.io.ByteUtils;
+import com.mucommander.commons.io.CounterOutputStream;
+import com.mucommander.commons.io.RandomAccessInputStream;
+import com.mucommander.commons.io.RandomAccessOutputStream;
 
 /**
  * This abstact class provides access to the Hadoop virtual filesystem, which, like the muCommander file API, provides a
@@ -63,7 +88,7 @@ public abstract class HadoopFile extends ProtocolFile {
     private boolean isWriting;
 
     /** Default Hadoop Configuration, whose values are fetched from XML configuration files. */
-    protected final static Configuration DEFAULT_CONFIGURATION = new Configuration();
+    protected static final Configuration DEFAULT_CONFIGURATION = new Configuration();
     
 
     protected HadoopFile(FileURL url) throws IOException {
@@ -81,8 +106,7 @@ public abstract class HadoopFile extends ProtocolFile {
                 throw e;
             }
             catch(Exception e) {
-                // FileSystem implementations throw IllegalArgumentException under various circumstances
-                throw new IOException(e.getMessage());
+                throw new IOException("Couldn't load Hadoop library, check for version mismatch!", e);
             }
         }
         else {
@@ -101,7 +125,8 @@ public abstract class HadoopFile extends ProtocolFile {
 
     private OutputStream getOutputStream(boolean append) throws IOException {
         OutputStream out = new CounterOutputStream(
-            append?fs.append(path):fs.create(path, true),
+            append ? (OutputStream)fs.append(path).getFsDataOutputStream() :
+                (OutputStream)fs.create(path, true).getFsDataOutputStream(),
             new ByteCounter() {
                 @Override
                 public synchronized void add(long nbBytes) {
@@ -283,7 +308,7 @@ public abstract class HadoopFile extends ProtocolFile {
 
     @Override
     public InputStream getInputStream() throws IOException {
-        return fs.open(path);
+        return (InputStream) fs.open(path).getFsDataInputStream();
     }
 
     @Override
@@ -357,17 +382,50 @@ public abstract class HadoopFile extends ProtocolFile {
     ////////////////////////
 
     @Override
-    public AbstractFile[] ls(FilenameFilter filter) throws IOException {
+    public AbstractFile[] ls(final FilenameFilter filter) throws IOException {
         // We need to ensure that the file is a directory: if it isn't listStatus returns an empty array but doesn't
         // throw an exception
         if(!exists() || !isDirectory())
             throw new IOException();
 
-        FileStatus[] statuses = filter==null
-                ?fs.listStatus(path)
-                :fs.listStatus(path, new HadoopFilenameFilter(filter));
+        FileStatus[] statuses;
+        if (filter == null) {
+            statuses = fs.listStatus(path);
+        }
+        else {
+            //creating an org.apache.hadoop.fs.PathFilter implementing class on the fly
+            Class<?> pathFilterClass = null;
+            try {
+                pathFilterClass = loadHadoopClass("org.apache.hadoop.fs.PathFilter");
+            }
+            catch(Exception e) {
+                throw new RuntimeException(e);
+            }
+            Object hadoopFilenameFilter = Proxy.newProxyInstance(
+                    pathFilterClass.getClassLoader(),
+                    new java.lang.Class[] {pathFilterClass}, new InvocationHandler() {
+                        
+                        @Override
+                        public Object invoke(Object proxy, java.lang.reflect.Method method,
+                                Object[] args) throws java.lang.Throwable {
+                            
+                            String method_name = method.getName();
+                            Class<?>[] classes = method.getParameterTypes();
+                            if (method_name.equals("accept") && 
+                                    classes[0] == Path.getClassToken()) {
+                                Method path_getName = 
+                                    ClassLoaderUtils.getMethod(Path.getClassToken(), "getName");
+                                
+                                return filter.accept((String)path_getName.invoke(path));
+                            }
+                            return null;
+                        }
+                    });
+            
+            statuses = fs.listStatus(path, hadoopFilenameFilter);
+        }
 
-        int nbChildren = statuses==null?0:statuses.length;
+        int nbChildren = (statuses == null) ? 0 : statuses.length;
         AbstractFile[] children = new AbstractFile[nbChildren];
         String parentPath = fileURL.getPath();
         if(!parentPath.endsWith("/"))
@@ -389,7 +447,7 @@ public abstract class HadoopFile extends ProtocolFile {
 
     @Override
     public void changePermissions(int permissions) throws IOException, UnsupportedFileOperationException {
-       fs.setPermission(path, new FsPermission((short)permissions));
+       fs.setPermission(path, permissions);
 
         // Update local attributes
         fileAttributes.setPermissions(new SimpleFilePermissions(permissions));
@@ -552,24 +610,4 @@ public abstract class HadoopFile extends ProtocolFile {
         }
     }
 
-    /**
-     * Turns a {@link FilenameFilter} into a Hadoop {@link PathFilter}.
-     */
-    private static class HadoopFilenameFilter implements PathFilter {
-
-        private FilenameFilter filenameFilter;
-
-        private HadoopFilenameFilter(FilenameFilter filenameFilter) {
-            this.filenameFilter = filenameFilter;
-        }
-
-
-        ///////////////////////////////
-        // PathFilter implementation //
-        ///////////////////////////////
-                                       
-        public boolean accept(Path path) {
-            return filenameFilter.accept(path.getName());
-        }
-    }
 }

@@ -58,5 +58,26 @@ public interface FileProtocols {
 
     /** Protocol for files served by a web server using Webdav/HTTPS. */
     public final static String WEBDAVS   = "webdavs";
-
+    
+    public final static String QFS   = "qfs";
+    
+    /**
+     * Protocols loaded by custom classloaders
+     * 
+     * @author Lorand Bendig <lbendig@gmail.com>
+     *
+     */
+    public enum CustomLoadableProtocol {
+        QFS(FileProtocols.QFS), 
+        HDFS(FileProtocols.HDFS);
+        
+        private String name;
+        private CustomLoadableProtocol(String name) {
+            this.name = name;
+        }
+        
+        public String getProtocolName() {
+            return name;
+        }
+    }
 }

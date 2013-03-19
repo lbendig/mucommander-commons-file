@@ -179,6 +179,7 @@ public class FileURL implements Cloneable {
                 return realm;
             }
         });
+        registerHandler(FileProtocols.QFS, new DefaultSchemeHandler(new DefaultSchemeParser(), 20000, "/", AuthenticationType.NO_AUTHENTICATION, null));
     }
 
 
