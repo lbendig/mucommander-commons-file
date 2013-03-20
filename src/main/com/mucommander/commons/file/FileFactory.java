@@ -210,6 +210,21 @@ public class FileFactory {
     }
     
     /**
+     * 
+     * @return true if Hadoop filesystem protocol is disabled
+     */
+    public static boolean isHDFSDisabled() {
+        return hadoopClassLoader == null;
+    }
+    
+    /**
+     * @return true if QFS filesystem protocol is disabled
+     */
+    public static boolean isQFSDisabled() {
+        return qfsClassLoader == null;
+    }
+    
+    /**
      * @return - The QFS classloader
      */
     public static ClassLoader getQFSClassLoader() {
